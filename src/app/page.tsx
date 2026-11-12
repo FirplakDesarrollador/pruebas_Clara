@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState } from "react";
-import { supabase } from "@/lib/supabase";
 import { X, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 
 const CATEGORIAS = [
@@ -12,6 +11,8 @@ const CATEGORIAS = [
   "Accesorios",
   "Deseo contactar un asesor",
 ];
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function Home() {
   const [isOpen, setIsOpen] = useState(true);
@@ -25,7 +26,7 @@ export default function Home() {
 
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{
-    type: "success" | "error" | "info";
+    type: "success" | "error";
     text: string;
   } | null>(null);
 
@@ -43,10 +44,32 @@ export default function Home() {
     e.preventDefault();
     setStatusMessage(null);
 
-    if (!formData.nombres || !formData.celularWhatsapp) {
+    // Validación en cliente: Nombre obligatorio
+    if (!formData.nombres.trim()) {
       setStatusMessage({
         type: "error",
-        text: "Por favor completa al menos tu nombre y celular/whatsapp.",
+        text: "Por favor ingresa tu nombre.",
+      });
+      return;
+    }
+
+    const emailTrimmed = formData.email.trim();
+    const telTrimmed = formData.celularWhatsapp.trim();
+
+    // Validación en cliente: Al menos teléfono o email
+    if (!emailTrimmed && !telTrimmed) {
+      setStatusMessage({
+        type: "error",
+        text: "Por favor ingresa al menos un número de teléfono o un correo electrónico.",
+      });
+      return;
+    }
+
+    // Validación en cliente: Formato de email si fue ingresado
+    if (emailTrimmed && !EMAIL_REGEX.test(emailTrimmed)) {
+      setStatusMessage({
+        type: "error",
+        text: "Por favor ingresa un correo electrónico con formato válido.",
       });
       return;
     }
@@ -54,34 +77,29 @@ export default function Home() {
     setLoading(true);
 
     try {
-      // Intentamos registrar en la tabla predeterminada 'asesorias' o 'leads'
-      // Si la tabla aún no está creada, capturamos el resultado para informar al usuario
-      const { data, error } = await supabase
-        .from("asesorias")
-        .insert([
-          {
-            nombres: formData.nombres,
-            apellidos: formData.apellidos,
-            celular_whatsapp: formData.celularWhatsapp,
-            email: formData.email,
-            categoria_interes: formData.categoria,
-            created_at: new Date().toISOString(),
-          },
-        ])
-        .select();
+      const response = await fetch("/api/leads", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          nombres: formData.nombres,
+          apellidos: formData.apellidos,
+          celularWhatsapp: formData.celularWhatsapp,
+          email: formData.email,
+          categoria: formData.categoria,
+          urlOrigen: typeof window !== "undefined" ? window.location.href : "",
+        }),
+      });
 
-      if (error) {
-        // En caso de que la tabla aún no exista o tenga otra estructura
-        console.warn("Respuesta de Supabase:", error);
-        setStatusMessage({
-          type: "info",
-          text: `Datos listos para enviar a Supabase. Respuesta: ${error.message} (Indícame el nombre de tu tabla para mapearla)`,
-        });
-      } else {
+      const data = await response.json().catch(() => null);
+
+      if (response.ok && data?.success) {
         setStatusMessage({
           type: "success",
           text: "¡Solicitud recibida con éxito! Un asesor se comunicará contigo pronto.",
         });
+        // Limpiar el formulario en caso de éxito
         setFormData({
           nombres: "",
           apellidos: "",
@@ -89,13 +107,16 @@ export default function Home() {
           email: "",
           categoria: "",
         });
+      } else {
+        setStatusMessage({
+          type: "error",
+          text: data?.error || "No pudimos enviar tu solicitud, intenta de nuevo",
+        });
       }
-    } catch (err: unknown) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Error inesperado al conectar con Supabase.";
+    } catch {
       setStatusMessage({
         type: "error",
-        text: errorMessage,
+        text: "No pudimos enviar tu solicitud, intenta de nuevo",
       });
     } finally {
       setLoading(false);
@@ -157,19 +178,13 @@ export default function Home() {
               className={`mb-5 p-3 rounded-lg text-sm flex items-start gap-2 ${
                 statusMessage.type === "success"
                   ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
-                  : statusMessage.type === "error"
-                  ? "bg-rose-50 text-rose-800 border border-rose-200"
-                  : "bg-blue-50 text-blue-800 border border-blue-200"
+                  : "bg-rose-50 text-rose-800 border border-rose-200"
               }`}
             >
-              {statusMessage.type === "success" && (
+              {statusMessage.type === "success" ? (
                 <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600" />
-              )}
-              {statusMessage.type === "error" && (
+              ) : (
                 <AlertCircle className="w-5 h-5 shrink-0 text-rose-600" />
-              )}
-              {statusMessage.type === "info" && (
-                <AlertCircle className="w-5 h-5 shrink-0 text-blue-600" />
               )}
               <span>{statusMessage.text}</span>
             </div>
@@ -211,7 +226,6 @@ export default function Home() {
                   value={formData.celularWhatsapp}
                   onChange={handleChange}
                   placeholder="Celular - Whatsapp"
-                  required
                   className="w-full px-3.5 py-2.5 rounded-sm border border-neutral-300 text-neutral-800 placeholder-neutral-400 focus:outline-none focus:border-neutral-500 focus:ring-1 focus:ring-neutral-400 text-base"
                 />
               </div>
@@ -246,10 +260,7 @@ export default function Home() {
                   ))}
                 </select>
                 <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-neutral-500">
-                  <svg
-                    className="w-4 h-4 fill-current"
-                    viewBox="0 0 20 20"
-                  >
+                  <svg className="w-4 h-4 fill-current" viewBox="0 0 20 20">
                     <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
                   </svg>
                 </div>
@@ -275,11 +286,11 @@ export default function Home() {
             </div>
           </form>
 
-          {/* Información de conexión a Supabase */}
+          {/* Información de conexión a CRM */}
           <div className="mt-4 pt-3 border-t border-neutral-100 flex items-center justify-between text-xs text-neutral-400">
-            <span>Supabase conectado</span>
+            <span>CRM Firplak</span>
             <span className="font-mono text-[11px] truncate max-w-[280px]">
-              upbshzmzaiunbglsahgo.supabase.co
+              API Leads (Ambiente de Pruebas)
             </span>
           </div>
         </div>
